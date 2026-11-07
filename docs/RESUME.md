@@ -3,6 +3,50 @@
 > AgentFlow —— 企业级 Agent 运行时平台 | Java 后端开发
 > 技术栈：Java 17、Spring Boot 3、WebFlux、PostgreSQL(pgvector)、Redis、RabbitMQ、Resilience4j、Micrometer、Testcontainers、k6
 
+## 一、简历粘贴版（直接复制，4 条）
+
+**标题行**
+
+```
+AgentFlow | 企业级 Agent 运行时平台
+Java 17 / Spring Boot 3.2 / WebFlux / PostgreSQL + pgvector / Redis / RabbitMQ
+```
+
+**一句话定位**：面向长任务的可恢复 Agent 运行时，解决流式输出、幂等、审批、限流在高并发下的失控问题。
+
+**核心条目（按优先级取 4 条）**
+
+1. 解决 Agent 长任务"断线即丢、超时失控"：设计 run/step 两级超时预算并将 deadline 沿调用链下传，配合 SSE 的 `Last-Event-ID` 断点回放实现断线续传；同轮多工具调用改为有界并行（上限 4，顺序可复现）。单实例 20 并发 × 10 轮共 200 请求全部成功，P50/P95/P99 = 3045/3076/3091ms，P99 与 P50 仅差 46ms，证明应用侧无排队放大。
+
+2. 定位并修复模型限流"只扣不退"导致的雪崩：压测发现 20 并发下 81% 请求失败（`NO_MODEL_AVAILABLE`），定位为本地令牌桶按 `prompt+maxTokens` 预扣、结算只退 Redis 不退本地桶；补齐 `refund` 归还路径并引入配额 Saga（INIT→RESERVED→SETTLED/REFUNDED）做对账补偿。同场景复测 200/200 成功、失败率 81%→0%，成功吞吐 2.9→5.59 runs/s，全程堆上限 512MB，零 OOM。
+
+3. 解决重复提交导致的重复建单与重复扣费：实现 `Idempotency-Key + Redis 状态机 + Lua CAS` 的分布式幂等，重复请求返回 409 且不重复执行；工具层再以 `(runId, toolCallId)` 做二级幂等，保证崩溃重放时工具恰好执行一次。
+
+4. 实现高风险工具的人机审批（HITL）挂起/恢复：按工具风险等级整轮预判，挂起时释放 run 租约、不占线程；审批通过后从 `state_json` 快照续跑。实测挂起期间副作用为 0，approve 后状态 `SUCCEEDED` 且工具恰好执行一次（`deleted` 计数 0→1）。
+
+**备选条目（按 JD 再挑 1–2 条）**
+
+5. 慢消费者隔离：SSE 采用 `DROP_OLDEST` + `stream.lagged` 信号 + 回放兜底，慢连接被主动断开而不阻塞生产端；模型侧实现 AIMD 自适应舱壁、fallback 链与熔断半开（CLOSED/OPEN/HALF_OPEN）。
+
+6. 可观测性：按 OpenTelemetry GenAI 语义约定落地 `invoke_agent → chat → execute_tool` 三级 span，异步链路用显式 parent context 而非 ThreadLocal，跨线程仍能正确成链。
+
+7. 工程质量：208 个用例全绿，Testcontainers 拉起真实 PG/Redis/RabbitMQ 做集成测试；补 `ApplicationContextRunner` 装配测试，修复了"207 个单测全绿但应用起不来"的双构造器注入问题。
+
+## 二、数字口径（面试必问）
+
+| 数字 | 诚实口径 |
+|---|---|
+| 5.59 runs/s | 单实例、本地 Docker、mock 模型，不是线上集群 |
+| P99 3.09s | 其中约 2.8s 是 mock 模型固定输出耗时，应用侧增量只有几十毫秒 |
+| 81%→0% | 同一场景、同一机器、同一并发的前后对比，可复现 |
+| 208 用例 | `mvn test` 实测，不是"覆盖 90%"这类虚数 |
+
+**不要写**："支撑百万 QPS""微服务集群""高可用多活"——没有实测支撑，一问就露。
+
+## 三、逐条证据（代码位置 + 验证命令）
+
+以下每条都能在仓库里点开对应文件、跑对应命令，用于面试前自检与现场追问。
+
 ## Bullet 1：Agent 运行时
 
 **简历表述**：实现 ReAct / Plan-Execute 双模式执行引擎，支持工具调用、token 预算裁剪、超长对话摘要压缩、pgvector 长期记忆召回、SSE 逐 token 流式输出与 `Last-Event-ID` 断线回放；用"最大步数 + 重复调用指纹 + 墙钟超时 + token 预算"四道闸防死循环。
