@@ -1,0 +1,22 @@
+# 构建产物
+target/
+**/target/
+mock-llm/target/
+
+# 版本控制
+.git/
+.gitignore
+
+# 文档与压测脚本，不进入镜像
+*.md
+docs/
+loadtest/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 本地环境
+.env
+docker/

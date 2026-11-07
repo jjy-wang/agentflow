@@ -1,0 +1,211 @@
+server:
+  port: 8080
+  shutdown: graceful
+  netty:
+    connection-timeout: 10s
+    idle-timeout: 0            # SSE 不用连接级空闲超时，用应用层心跳
+
+spring:
+  application:
+    name: agentflow
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  main:
+    web-application-type: reactive
+    # MetricGuard 启动期自检需读取 MeterRegistry，而 Micrometer 注册表又依赖本 Bean，
+    # 形成构造期环依赖；允许循环引用，避免应用启动即失败
+    allow-circular-references: true
+
+  datasource:
+    rw:
+      driver-class-name: org.postgresql.Driver
+      url: jdbc:postgresql://${DB_HOST:localhost}:5432/agentflow?reWriteBatchedInserts=true
+      username: ${DB_USER:agentflow}
+      password: ${DB_PASSWORD:agentflow}
+      hikari:
+        pool-name: rw-pool
+        maximum-pool-size: 20
+        minimum-idle: 5
+        connection-timeout: 3000
+        idle-timeout: 600000
+        max-lifetime: 1800000
+        leak-detection-threshold: 20000
+    ro:
+      driver-class-name: org.postgresql.Driver
+      url: jdbc:postgresql://${DB_HOST:localhost}:5432/agentflow?readOnly=true
+      username: ${DB_RO_USER:agentflow_ro}
+      password: ${DB_RO_PASSWORD:agentflow_ro}
+      hikari:
+        pool-name: ro-pool
+        maximum-pool-size: 20
+        minimum-idle: 5
+        connection-timeout: 3000
+        read-only: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+    out-of-order: false
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 32
+          max-idle: 16
+          min-idle: 4
+          max-wait: 1000ms
+
+  rabbitmq:
+    host: ${MQ_HOST:localhost}
+    port: 5672
+    username: agentflow
+    password: agentflow
+    virtual-host: /agentflow
+    listener:
+      simple:
+        # 手动 ACK：消费者按状态机结果显式 basicAck / basicNack，重试耗尽或不合法消息进死信
+        acknowledge-mode: manual
+        prefetch: 1            # 报表任务单条较重，按消费能力逐条拉取，避免单实例堆积
+        concurrency: 2
+        max-concurrency: 4
+        retry:
+          enabled: false       # 重试由业务代码控制（agentflow.report.max-retry），避免与手动 ACK 冲突
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics,threaddump
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: agentflow
+    distribution:
+      percentiles-histogram:
+        agent.run.duration: true
+        agent.ttft: true
+      percentiles:
+        agent.run.duration: 0.5,0.95,0.99
+        agent.ttft: 0.5,0.95,0.99
+
+logging:
+  level:
+    root: INFO
+    cn.com.agentflow: INFO
+  config: classpath:logback-spring.xml
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+agentflow:
+  instance-id: ${INSTANCE_ID:${HOSTNAME:local}}
+  telemetry:
+    # 全局 OTel Sampler 的唯一入口（TracingConfig#agentFlowSampler）；
+    # Boot 的 management.tracing.sampling.probability 已被该 Bean 覆盖，避免双重采样。
+    sample-rate: ${TRACING_SAMPLE:0.1}
+    capture-content: false             # prompt/completion 默认不入 span，只记长度与 token 数
+    max-content-chars: 4096            # 开启 capture-content 后先 SensitiveMasker 脱敏再截断
+  prompt:
+    log-fingerprint: true              # DEBUG 日志输出 sha256 前缀指纹，便于验证缓存可复用性
+  llm:
+    default-model: mock-large
+    # 全局默认 fallback 链（有序）：模型未单独配置 fallback-chain 时生效；
+    # 链内自动去重并跳过未注册模型，金丝雀只改首选、不改变本链兜底顺序。
+    fallback-chain: [mock-large, mock-small]
+    max-attempts: 3
+    cooldown:                          # 熔断三态：CLOSED → OPEN（冷却）→ HALF_OPEN（半开探测）
+      failure-threshold: 3             # 连续失败达到该次数打开熔断
+      open-ms: 30000                   # 全局冷却时长；模型可用 cooldown-ms 覆盖
+      half-open-probes: 1              # 半开期只放一个探测请求，成功闭合、失败重新冷却
+    models:
+      mock-large:
+        base-url: ${LLM_MOCK_BASE_URL:http://localhost:9000}
+        model: mock-large
+        api-key: ${MOCK_API_KEY:mock}
+        context-window: 32768
+        rpm-limit: 600
+        tpm-limit: 200000
+        max-concurrency: 64
+        timeout-ms: 60000
+        ttft-timeout-ms: 15000
+        cooldown-ms: 30000             # 模型级冷却，优先于全局 open-ms
+        fallback-chain: [mock-small]   # 主模型失败后切到 mock-small
+      mock-small:
+        base-url: ${LLM_MOCK_BASE_URL:http://localhost:9000}
+        model: mock-small
+        api-key: ${MOCK_API_KEY:mock}
+        context-window: 8192
+        rpm-limit: 1200
+        tpm-limit: 400000
+        max-concurrency: 128
+        timeout-ms: 30000
+        ttft-timeout-ms: 8000
+        cooldown-ms: 30000
+  agent:
+    max-steps: 12
+    max-tool-calls: 8
+    max-wall-clock-ms: 120000
+    max-duration-ms: 300000            # 单 run 墙钟总预算（硬截止），超时按 RUN_TIMEOUT 收尾
+    step-timeout-ms: 60000             # 单步预算：一次 LLM 调用 + 该步工具执行，超时最多重试 1 次
+    default-token-budget: 32000
+    compressor-trigger-ratio: 0.90      # 历史占用超过预算 90% 触发摘要
+    tool-result-max-tokens: 2000
+    summary-max-tokens: 500
+    memory-pre-retrieval:               # 开跑前召回一次长期记忆注入 system prompt
+      enabled: true
+      top-k: 5
+    token-budget-ratio:
+      system: 0.10
+      tools: 0.15
+      history: 0.45
+      output: 0.30
+  tool:
+    parallel:
+      enabled: true                     # 同轮多个工具调用有界并行
+      max-concurrency: 4                # 在途工具上限；关闭后退回串行
+  approval:
+    timeout: 30m                        # 超时未裁决的审批单由对账任务/审批入口惰性收敛为 TIMEOUT
+  stream:
+    heartbeat-seconds: 15
+    replay-buffer-size: 500
+    replay-ttl-seconds: 1800
+    max-connections-per-tenant: 200
+    write-buffer-size: 256             # 单连接有界缓冲；满了丢最旧（可回放），正常消费者无感知
+    max-lag-events: 200                # 单连接连续丢弃超过该阈值即主动断连，客户端带 Last-Event-ID 重连回放
+    write-timeout-seconds: 5
+  run:
+    lease-seconds: 60
+    recovery-interval-ms: 5000
+    recovery-batch: 50
+  report:
+    max-retry: 3               # 首次失败后最多同步重试 3 次（总尝试 4 次），耗尽后标记 FAILED 并进死信
+    output-dir: ./data/reports
+  quota:
+    local-precheck-enabled: true
+    local-factor: 1.2                  # 本地桶容量 = 全局 / 实例数 * 1.2
+    daily-run-limit-free: 200
+    daily-run-limit-standard: 5000
+    daily-run-limit-premium: 100000
+    reconcile:                         # 预扣 Saga 对账补偿：扫 INIT/RESERVED 陈旧账本并退款
+      enabled: true
+      interval-ms: 60000               # 扫描间隔
+      stale-after: 5m                  # 超过该时长仍非终态视为陈旧
+      batch-size: 200
+  memory:
+    recall-top-k: 5
+    recall-threshold: 0.75
+    weight-lambda: 0.01
+  idempotency:
+    enabled: true
+    require-key: false                 # 默认不强制，保持老客户端兼容；核心业务可按需开启
+    ttl: 10m                           # 处理中锁与已完成响应的统一保留窗口
+    key-max-length: 128

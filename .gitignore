@@ -1,0 +1,22 @@
+# Maven
+target/
+*.jar.original
+
+# 构建与测试产物
+*.log
+*.exec
+*.hprof
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 本地配置（含密钥时不要提交）
+.env
+application-local.yml

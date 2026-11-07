@@ -1,0 +1,111 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: af-postgres
+    environment:
+      POSTGRES_DB: agentflow
+      POSTGRES_USER: agentflow
+      POSTGRES_PASSWORD: agentflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./docker/init-ro-user.sql:/docker-entrypoint-initdb.d/10-ro-user.sql:ro
+      - af-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentflow -d agentflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    command: >
+      postgres -c max_connections=300
+               -c shared_buffers=256MB
+               -c effective_cache_size=768MB
+               -c work_mem=8MB
+               -c log_min_duration_statement=200
+               -c shared_preload_libraries=pg_stat_statements
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: af-redis
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+                   --appendonly no --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: af-rabbit
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: agentflow
+      RABBITMQ_DEFAULT_PASS: agentflow
+      RABBITMQ_DEFAULT_VHOST: /agentflow
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  mock-llm:
+    build:
+      context: ./mock-llm
+      dockerfile: Dockerfile
+    container_name: af-mock-llm
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+
+  app1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: af-app1
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      mock-llm: { condition: service_healthy }
+    environment:
+      INSTANCE_ID: app1
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      MQ_HOST: rabbitmq
+      LLM_MOCK_BASE_URL: http://mock-llm:9000
+      JAVA_OPTS: "-Xms512m -Xmx512m -XX:+UseG1GC"
+    ports:
+      - "8080:8080"
+
+  app2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: af-app2
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      mock-llm: { condition: service_healthy }
+    environment:
+      INSTANCE_ID: app2
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      MQ_HOST: rabbitmq
+      LLM_MOCK_BASE_URL: http://mock-llm:9000
+      JAVA_OPTS: "-Xms512m -Xmx512m -XX:+UseG1GC"
+    ports:
+      - "8081:8080"
+
+volumes:
+  af-pg-data:

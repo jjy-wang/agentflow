@@ -1,0 +1,1390 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AgentFlow · 运行时控制台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink: #0a0a0c;
+    --ink-2: #0e0f12;
+    --ink-3: #141519;
+    --line: rgba(233, 228, 217, 0.10);
+    --line-strong: rgba(233, 228, 217, 0.22);
+    --paper: #e9e4d9;
+    --paper-dim: #a8a294;
+    --muted: #6b6759;
+    --vermilion: #ff5c2b;
+    --mint: #8ae1c9;
+    --amber: #ffc24b;
+    --lime: #b6e63e;
+    --violet: #b9a6ff;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --serif: 'Instrument Serif', 'Songti SC', Georgia, serif;
+    --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--mono);
+    font-weight: 400;
+    font-size: 13px;
+    line-height: 1.55;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* 底层氛围：网格 + 顶部朱红辉光 */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+      radial-gradient(900px 420px at 18% -10%, rgba(255, 92, 43, 0.13), transparent 70%),
+      radial-gradient(700px 380px at 92% 108%, rgba(138, 225, 201, 0.07), transparent 72%),
+      repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px 84px),
+      repeating-linear-gradient(to bottom, var(--line) 0 1px, transparent 1px 84px);
+    opacity: 0.55;
+  }
+
+  /* 颗粒质感 */
+  .grain {
+    position: fixed;
+    inset: -50%;
+    z-index: 90;
+    pointer-events: none;
+    opacity: 0.05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    animation: grainShift 8s steps(6) infinite;
+  }
+  @keyframes grainShift {
+    0%   { transform: translate(0, 0); }
+    20%  { transform: translate(-2%, 1%); }
+    40%  { transform: translate(1%, -2%); }
+    60%  { transform: translate(-1%, -1%); }
+    80%  { transform: translate(2%, 2%); }
+    100% { transform: translate(0, 0); }
+  }
+
+  /* ============ 骨架 ============ */
+  .shell {
+    position: relative;
+    z-index: 1;
+    height: 100%;
+    display: grid;
+    grid-template-columns: 62px minmax(0, 1fr) 372px;
+  }
+
+  /* ---- 左侧竖排轨道 ---- */
+  .rail {
+    border-right: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0 18px;
+    animation: rise 0.7s var(--ease) both;
+  }
+  .rail__mark {
+    width: 26px; height: 26px;
+    display: grid; place-items: center;
+    border: 1px solid var(--line-strong);
+    border-radius: 50%;
+    position: relative;
+  }
+  .rail__mark::after {
+    content: '';
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--vermilion);
+    box-shadow: 0 0 12px var(--vermilion);
+    animation: breathe 2.6s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.35; transform: scale(0.75); }
+  }
+  .rail__word {
+    writing-mode: vertical-rl;
+    letter-spacing: 0.42em;
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .rail__meta {
+    writing-mode: vertical-rl;
+    font-size: 9px;
+    letter-spacing: 0.28em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .rail__line { flex: 1; width: 1px; background: var(--line); margin: 18px 0; }
+
+  /* ---- 中栏 ---- */
+  .stage {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 22px 32px 18px;
+    border-bottom: 1px solid var(--line);
+    animation: rise 0.7s 0.06s var(--ease) both;
+  }
+  .brand { display: flex; align-items: baseline; gap: 14px; }
+  .brand h1 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 30px;
+    letter-spacing: -0.01em;
+    line-height: 1;
+  }
+  .brand h1 em { font-style: italic; color: var(--vermilion); }
+  .brand span {
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .conn {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--paper-dim);
+  }
+  .conn__dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .conn[data-s="live"] .conn__dot { background: var(--mint); box-shadow: 0 0 10px var(--mint); }
+  .conn[data-s="live"] { color: var(--mint); }
+  .conn[data-s="demo"] .conn__dot { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+  .conn[data-s="demo"] { color: var(--amber); }
+  .conn[data-s="error"] .conn__dot { background: var(--vermilion); box-shadow: 0 0 10px var(--vermilion); }
+  .conn[data-s="error"] { color: var(--vermilion); }
+
+  /* ---- 输入区 ---- */
+  .composer {
+    padding: 26px 32px 22px;
+    border-bottom: 1px solid var(--line);
+    animation: rise 0.7s 0.12s var(--ease) both;
+  }
+  .composer__label {
+    font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 12px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .composer__label::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+
+  .composer__row {
+    display: flex; gap: 18px; align-items: flex-end;
+  }
+  .composer__inputwrap { flex: 1; min-width: 0; }
+
+  #query {
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--line-strong);
+    color: var(--paper);
+    font-family: var(--serif);
+    font-size: 26px;
+    line-height: 1.35;
+    padding: 6px 2px 12px;
+    resize: none;
+    outline: none;
+    min-height: 74px;
+    max-height: 150px;
+    transition: border-color 0.25s;
+  }
+  #query::placeholder { color: #3f3d38; font-style: italic; }
+  #query:focus { border-bottom-color: var(--vermilion); }
+  #query.invalid { border-bottom-color: var(--vermilion); }
+
+  .composer__err {
+    display: none;
+    margin-top: 8px;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    color: var(--vermilion);
+  }
+  .composer__err.show { display: block; }
+
+  .btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    padding: 13px 22px;
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    color: var(--paper);
+    cursor: pointer;
+    transition: all 0.22s var(--ease);
+    white-space: nowrap;
+    position: relative;
+    overflow: hidden;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--paper); background: rgba(233, 228, 217, 0.05); }
+  .btn:disabled { opacity: 0.32; cursor: not-allowed; }
+  .btn--primary {
+    background: var(--vermilion);
+    border-color: var(--vermilion);
+    color: #120503;
+    font-weight: 600;
+  }
+  .btn--primary:hover:not(:disabled) {
+    background: #ff7449;
+    border-color: #ff7449;
+    box-shadow: 0 0 26px rgba(255, 92, 43, 0.35);
+  }
+  .btn--ghost { border-color: var(--line); color: var(--paper-dim); }
+  .btn--ghost:hover:not(:disabled) { color: var(--paper); }
+
+  .composer__params {
+    display: flex; gap: 22px; margin-top: 16px; flex-wrap: wrap;
+    align-items: center;
+  }
+  .field { display: flex; align-items: center; gap: 8px; }
+  .field label {
+    font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted);
+  }
+  .field input, .field select {
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--paper);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    padding: 5px 9px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .field input:focus, .field select:focus { border-color: var(--vermilion); }
+  .field input { width: 92px; }
+  .field select { width: 128px; }
+  .field select option { background: var(--ink-3); }
+
+  .hint {
+    margin-left: auto;
+    font-size: 9.5px; letter-spacing: 0.1em; color: var(--muted);
+  }
+  .hint kbd {
+    border: 1px solid var(--line); padding: 1px 4px; font-family: var(--mono); font-size: 9px;
+  }
+
+  /* ---- 事件流 ---- */
+  .stream {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    animation: rise 0.7s 0.18s var(--ease) both;
+  }
+  .stream__head {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 32px;
+    border-bottom: 1px solid var(--line);
+  }
+  .stream__title {
+    font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--paper-dim);
+  }
+  .stream__count {
+    font-size: 10px; color: var(--muted);
+    border: 1px solid var(--line); padding: 0 6px;
+  }
+  .stream__tools { margin-left: auto; display: flex; gap: 3px; }
+  .mini {
+    background: none; border: none; color: var(--muted);
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em;
+    text-transform: uppercase; cursor: pointer; padding: 4px 8px;
+    transition: color 0.2s;
+  }
+  .mini:hover { color: var(--paper); }
+
+  .stream__body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0 40px;
+    scrollbar-width: thin;
+    scrollbar-color: #2a2b30 transparent;
+  }
+  .stream__body::-webkit-scrollbar { width: 9px; }
+  .stream__body::-webkit-scrollbar-thumb { background: #24252a; border: 3px solid var(--ink); }
+
+  .empty {
+    display: grid; place-items: center;
+    height: 100%;
+    text-align: center;
+    padding: 40px;
+    gap: 14px;
+  }
+  .empty__quote {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-style: italic;
+    color: #4d4a43;
+    max-width: 380px;
+    line-height: 1.5;
+  }
+  .empty__sub { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: #38363a; }
+
+  .ev {
+    display: grid;
+    grid-template-columns: 52px 86px 1px minmax(0, 1fr);
+    gap: 0 14px;
+    padding: 9px 32px 9px 0;
+    border-bottom: 1px solid rgba(233, 228, 217, 0.045);
+    cursor: pointer;
+    position: relative;
+    animation: evIn 0.36s var(--ease) both;
+  }
+  @keyframes evIn {
+    from { opacity: 0; transform: translateX(-8px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  .ev:hover { background: rgba(233, 228, 217, 0.022); }
+  .ev__seq {
+    text-align: right;
+    font-size: 10px;
+    color: #43413b;
+    padding-top: 1px;
+    font-variant-numeric: tabular-nums;
+  }
+  .ev__time {
+    font-size: 10px; color: var(--muted); padding-top: 1px;
+    font-variant-numeric: tabular-nums;
+  }
+  .ev__bar { background: var(--line); }
+  .ev__body { min-width: 0; padding-left: 14px; }
+  .ev__top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .ev__type {
+    font-size: 10.5px; letter-spacing: 0.09em;
+    padding: 1px 7px;
+    border: 1px solid currentColor;
+    color: var(--paper-dim);
+    white-space: nowrap;
+  }
+  .ev__sum {
+    font-size: 11.5px;
+    color: var(--paper);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
+  }
+  .ev__json {
+    display: none;
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: rgba(0, 0, 0, 0.42);
+    border-left: 1px solid var(--line-strong);
+    font-size: 11px;
+    color: var(--paper-dim);
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.6;
+  }
+  .ev.open .ev__json { display: block; }
+
+  .ev[data-t="run.started"] .ev__type { color: var(--mint); }
+  .ev[data-t="run.started"] .ev__bar { background: var(--mint); }
+  .ev[data-t="tool.call"] .ev__type { color: var(--violet); }
+  .ev[data-t="tool.call"] .ev__bar { background: var(--violet); }
+  .ev[data-t="tool.result"] .ev__type { color: var(--amber); }
+  .ev[data-t="tool.result"] .ev__bar { background: var(--amber); }
+  .ev[data-t="run.succeeded"] .ev__type { color: var(--lime); }
+  .ev[data-t="run.succeeded"] .ev__bar { background: var(--lime); }
+  .ev[data-t="run.failed"] .ev__type,
+  .ev[data-t="run.canceled"] .ev__type { color: var(--vermilion); }
+  .ev[data-t="run.failed"] .ev__bar,
+  .ev[data-t="run.canceled"] .ev__bar { background: var(--vermilion); }
+  .ev[data-t="run.waiting_approval"] .ev__type { color: var(--amber); }
+  .ev[data-t="run.waiting_approval"] .ev__bar { background: var(--amber); }
+  .ev[data-t="step.started"] .ev__type { color: #8fb4ff; }
+  .ev[data-t="step.started"] .ev__bar { background: #8fb4ff; }
+  .ev[data-t="error"] .ev__type { color: var(--vermilion); }
+  .ev[data-t="error"] .ev__bar { background: var(--vermilion); }
+
+  /* ---- 右栏 ---- */
+  .side {
+    border-left: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #2a2b30 transparent;
+    animation: rise 0.7s 0.1s var(--ease) both;
+  }
+  .side::-webkit-scrollbar { width: 9px; }
+  .side::-webkit-scrollbar-thumb { background: #24252a; border: 3px solid var(--ink); }
+
+  .card {
+    border-bottom: 1px solid var(--line);
+    padding: 18px 22px 20px;
+  }
+  .card__head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .card__title {
+    font-size: 9.5px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--muted);
+  }
+
+  .state-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+    padding: 3px 9px;
+    border: 1px solid var(--line-strong);
+    color: var(--paper-dim);
+  }
+  .state-pill::before {
+    content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor;
+  }
+  .state-pill[data-s="RUNNING"] { color: var(--mint); border-color: rgba(138,225,201,.4); }
+  .state-pill[data-s="RUNNING"]::before { animation: breathe 1.4s ease-in-out infinite; }
+  .state-pill[data-s="WAITING_APPROVAL"] { color: var(--amber); border-color: rgba(255,194,75,.4); }
+  .state-pill[data-s="SUCCEEDED"] { color: var(--lime); border-color: rgba(182,230,62,.4); }
+  .state-pill[data-s="FAILED"],
+  .state-pill[data-s="CANCELED"],
+  .state-pill[data-s="TIMEOUT"] { color: var(--vermilion); border-color: rgba(255,92,43,.4); }
+  .state-pill[data-s="PENDING"] { color: var(--paper-dim); }
+
+  .runid {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--paper-dim);
+    padding: 7px 9px;
+    background: rgba(0,0,0,0.32);
+    border: 1px solid var(--line);
+    margin-bottom: 16px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .runid:hover { border-color: var(--line-strong); }
+  .runid code {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 11px; color: var(--paper);
+  }
+  .runid b {
+    font-size: 8.5px; letter-spacing: 0.16em; color: var(--muted); font-weight: 500;
+  }
+
+  .elapsed {
+    font-family: var(--serif);
+    font-size: 46px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 2px;
+  }
+  .elapsed-sub {
+    font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 18px;
+  }
+
+  .kv {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 7px 12px;
+    font-size: 11px;
+  }
+  .kv dt { color: var(--muted); letter-spacing: 0.06em; }
+  .kv dd { color: var(--paper); text-align: right; font-variant-numeric: tabular-nums; }
+
+  .actions { display: flex; gap: 8px; margin-top: 18px; }
+  .actions .btn { flex: 1; padding: 10px 12px; font-size: 10px; }
+
+  /* 输出面板 */
+  .output {
+    margin: 0;
+    padding: 12px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: var(--paper-dim);
+    max-height: 210px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    scrollbar-width: thin;
+  }
+  .output:empty::before {
+    content: '等待模型输出…';
+    color: #3a3833;
+  }
+  .caret {
+    display: inline-block; width: 6px; height: 12px;
+    background: var(--vermilion);
+    vertical-align: -1px;
+    animation: blink 1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* 审批卡 */
+  .approval {
+    border: 1px solid rgba(255, 194, 75, 0.32);
+    background: rgba(255, 194, 75, 0.045);
+    padding: 16px;
+    margin-bottom: 4px;
+    animation: rise 0.5s var(--ease) both;
+  }
+  .approval__title {
+    font-family: var(--serif); font-size: 19px; margin-bottom: 4px;
+  }
+  .approval__desc { font-size: 11px; color: var(--paper-dim); margin-bottom: 14px; }
+  .approval__desc code { color: var(--amber); }
+  .approval .btn { width: 100%; margin-bottom: 7px; }
+  .approval .btn:last-child { margin-bottom: 0; }
+
+  /* 设置卡 */
+  .settings .field { display: block; margin-bottom: 11px; }
+  .settings .field label {
+    display: block; margin-bottom: 5px; font-size: 9px;
+  }
+  .settings .field input { width: 100%; }
+  .settings__note {
+    font-size: 9.5px; color: var(--muted); line-height: 1.7; margin-top: 12px;
+    border-top: 1px solid var(--line); padding-top: 11px;
+  }
+  .settings__note code { color: var(--paper-dim); }
+
+  .legend {
+    padding: 16px 22px 24px;
+    font-size: 9.5px;
+    color: #4a4740;
+    line-height: 1.9;
+  }
+  .legend b { color: var(--muted); font-weight: 500; letter-spacing: 0.14em; }
+
+  /* toast */
+  .toast {
+    position: fixed; left: 50%; bottom: 30px; transform: translate(-50%, 24px);
+    background: var(--paper); color: var(--ink);
+    font-size: 11px; letter-spacing: 0.08em;
+    padding: 9px 18px;
+    z-index: 200;
+    opacity: 0; pointer-events: none;
+    transition: all 0.3s var(--ease);
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast[data-k="err"] { background: var(--vermilion); color: #fff; }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (max-width: 1180px) {
+    .shell { grid-template-columns: 62px minmax(0, 1fr) 320px; }
+  }
+
+  @media (max-width: 920px) {
+    body { overflow: auto; }
+    .shell { grid-template-columns: 1fr; height: auto; min-height: 100%; }
+    .rail { display: none; }
+    .side { border-left: none; border-top: 1px solid var(--line); }
+    .topbar, .composer, .stream__head { padding-left: 20px; padding-right: 20px; }
+    .ev { padding-right: 20px; }
+    #query { font-size: 21px; }
+    .elapsed { font-size: 36px; }
+  }
+</style>
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+
+<div class="shell">
+
+  <!-- 左轨 -->
+  <aside class="rail">
+    <div class="rail__mark" aria-hidden="true"></div>
+    <div class="rail__word">Agent&nbsp;Runtime</div>
+    <div class="rail__line"></div>
+    <div class="rail__meta">v1.0.0</div>
+  </aside>
+
+  <!-- 中栏 -->
+  <main class="stage">
+
+    <header class="topbar">
+      <div class="brand">
+        <h1>Agent<em>Flow</em></h1>
+        <span>Runtime Control</span>
+      </div>
+      <div class="conn" id="conn" data-s="idle">
+        <span class="conn__dot"></span>
+        <span id="connText">未连接</span>
+      </div>
+    </header>
+
+    <section class="composer">
+      <div class="composer__label">Dispatch</div>
+      <div class="composer__row">
+        <div class="composer__inputwrap">
+          <textarea id="query" rows="2"
+            placeholder="描述要让运行时完成的任务，例如：检索内网资产并汇总暴露面风险"></textarea>
+          <p class="composer__err" id="queryErr">需要先描述任务</p>
+        </div>
+        <button class="btn btn--primary" id="runBtn">Run</button>
+      </div>
+
+      <div class="composer__params">
+        <div class="field">
+          <label for="model">Model</label>
+          <select id="model">
+            <option value="mock-large">mock-large</option>
+            <option value="mock-small">mock-small</option>
+            <option value="mock-canary">mock-canary</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="maxSteps">Max Steps</label>
+          <input id="maxSteps" type="number" min="1" max="50" value="8" />
+        </div>
+        <div class="field">
+          <label for="mode">Mode</label>
+          <select id="mode">
+            <option value="">默认（REACT）</option>
+            <option value="REACT">REACT</option>
+            <option value="PLAN_EXECUTE">PLAN_EXECUTE</option>
+          </select>
+        </div>
+        <span class="hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> 提交</span>
+      </div>
+    </section>
+
+    <section class="stream">
+      <div class="stream__head">
+        <span class="stream__title">Event Stream</span>
+        <span class="stream__count" id="evCount">0</span>
+        <div class="stream__tools">
+          <button class="mini" id="clearBtn">清空</button>
+          <button class="mini" id="reconnectBtn">重连</button>
+        </div>
+      </div>
+      <div class="stream__body" id="streamBody">
+        <div class="empty" id="emptyState">
+          <p class="empty__quote">"每一次推理，都是一次可观测的执行。"</p>
+          <p class="empty__sub">Dispatch a run to begin</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 右栏 -->
+  <aside class="side">
+
+    <section class="card">
+      <div class="card__head">
+        <span class="card__title">Run</span>
+        <span class="state-pill" id="statePill" data-s="IDLE">Idle</span>
+      </div>
+
+      <div class="runid" id="runIdBox" title="点击复制 runId">
+        <code id="runIdText">—</code>
+        <b>COPY</b>
+      </div>
+
+      <div class="elapsed" id="elapsed">00:00</div>
+      <div class="elapsed-sub">wall clock</div>
+
+      <dl class="kv">
+        <dt>步骤</dt><dd id="kSteps">0</dd>
+        <dt>事件</dt><dd id="kEvents">0</dd>
+        <dt>工具调用</dt><dd id="kTools">0</dd>
+        <dt>输出字符</dt><dd id="kChars">0</dd>
+      </dl>
+
+      <div class="actions">
+        <button class="btn btn--ghost" id="statusBtn">查状态</button>
+        <button class="btn btn--ghost" id="cancelBtn">取消</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card__head">
+        <span class="card__title">Model Output</span>
+      </div>
+      <pre class="output" id="output"></pre>
+    </section>
+
+    <section class="card" id="approvalCard" hidden>
+      <div class="card__head">
+        <span class="card__title">Human Approval</span>
+      </div>
+      <div class="approval">
+        <div class="approval__title">需要人工确认</div>
+        <p class="approval__desc" id="approvalDesc">
+          运行时挂起，等待审批后继续。
+        </p>
+        <button class="btn btn--primary" id="approveBtn">批准并继续</button>
+        <button class="btn btn--ghost" id="rejectBtn">驳回</button>
+      </div>
+    </section>
+
+    <section class="card settings">
+      <div class="card__head">
+        <span class="card__title">Connection</span>
+      </div>
+      <div class="field">
+        <label for="baseUrl">Base URL</label>
+        <input id="baseUrl" type="text" value="http://localhost:8080" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label for="apiKey">X-Api-Key</label>
+        <input id="apiKey" type="text" value="demo-key-123456" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label for="approver">审批人</label>
+        <input id="approver" type="text" value="ops@demo" spellcheck="false" />
+      </div>
+      <p class="settings__note">
+        后端未启动时自动进入<code>离线演示模式</code>，用本地事件流演示交互；
+        连上 <code>/v1/agent</code> 后即切换为真实 SSE。
+      </p>
+    </section>
+
+    <div class="legend">
+      <b>接口</b><br />
+      POST /v1/agent/runs/stream · GET /v1/agent/runs/{id}/events<br />
+      GET /v1/agent/runs/{id}/status · POST /v1/agent/runs/{id}/cancel<br />
+      POST /v1/agent/runs/{id}/approve | reject
+    </div>
+
+  </aside>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ================= 状态 ================= */
+  const SAME_ORIGIN = /^https?:$/.test(location.protocol) ? location.origin : null;
+  const S = {
+    base: SAME_ORIGIN || 'http://localhost:8080',
+    apiKey: 'demo-key-123456',
+    approver: 'ops@demo',
+    runId: null,
+    state: 'IDLE',
+    events: [],
+    steps: 0,
+    tools: 0,
+    chars: 0,
+    startedAt: 0,
+    endedAt: 0,
+    abort: null,
+    lastEventId: null,
+    tick: null,
+    demo: false,
+    lastTool: null
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    conn: $('conn'), connText: $('connText'),
+    query: $('query'), queryErr: $('queryErr'), model: $('model'), maxSteps: $('maxSteps'), mode: $('mode'),
+    runBtn: $('runBtn'), streamBody: $('streamBody'), emptyState: $('emptyState'),
+    evCount: $('evCount'), clearBtn: $('clearBtn'), reconnectBtn: $('reconnectBtn'),
+    statePill: $('statePill'), runIdBox: $('runIdBox'), runIdText: $('runIdText'),
+    elapsed: $('elapsed'), kSteps: $('kSteps'), kEvents: $('kEvents'),
+    kTools: $('kTools'), kChars: $('kChars'),
+    statusBtn: $('statusBtn'), cancelBtn: $('cancelBtn'),
+    output: $('output'), approvalCard: $('approvalCard'), approvalDesc: $('approvalDesc'),
+    approveBtn: $('approveBtn'), rejectBtn: $('rejectBtn'),
+    baseUrl: $('baseUrl'), apiKey: $('apiKey'), approver: $('approver'),
+    toast: $('toast')
+  };
+
+  /* ================= 工具 ================= */
+  let toastTimer = null;
+  function toast(msg, kind) {
+    els.toast.textContent = msg;
+    els.toast.dataset.k = kind || 'ok';
+    els.toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2400);
+  }
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  function fmtTime(d) {
+    return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) +
+      '.' + String(d.getMilliseconds()).padStart(3, '0');
+  }
+
+  function setConn(mode, text) {
+    els.conn.dataset.s = mode;
+    els.connText.textContent = text;
+  }
+
+  function setState(st) {
+    S.state = st;
+    els.statePill.dataset.s = st;
+    els.statePill.textContent = st;
+    const terminal = ['SUCCEEDED', 'FAILED', 'CANCELED', 'TIMEOUT'].indexOf(st) >= 0;
+    if (terminal && !S.endedAt) {
+      S.endedAt = Date.now();
+      stopTick();
+    }
+    if (st === 'WAITING_APPROVAL') {
+      els.approvalCard.hidden = false;
+    } else if (terminal) {
+      els.approvalCard.hidden = true;
+    }
+    els.runBtn.disabled = !terminal && st !== 'IDLE';
+  }
+
+  function startTick() {
+    stopTick();
+    els.elapsed.textContent = '00:00';
+    S.tick = setInterval(() => {
+      if (!S.startedAt) return;
+      const end = S.endedAt || Date.now();
+      const sec = Math.max(0, Math.floor((end - S.startedAt) / 1000));
+      els.elapsed.textContent = pad(Math.floor(sec / 60)) + ':' + pad(sec % 60);
+    }, 200);
+  }
+  function stopTick() {
+    if (S.tick) { clearInterval(S.tick); S.tick = null; }
+    if (S.startedAt) {
+      const end = S.endedAt || Date.now();
+      const sec = Math.max(0, Math.floor((end - S.startedAt) / 1000));
+      els.elapsed.textContent = pad(Math.floor(sec / 60)) + ':' + pad(sec % 60);
+    }
+  }
+
+  function bumpStats() {
+    els.evCount.textContent = String(S.events.length);
+    els.kEvents.textContent = String(S.events.length);
+    els.kSteps.textContent = String(S.steps);
+    els.kTools.textContent = String(S.tools);
+    els.kChars.textContent = String(S.chars);
+  }
+
+  /* ================= 事件渲染 ================= */
+  function summarize(type, data) {
+    if (type === 'run.started') return 'runId=' + (data.runId || '?') + ' · ' + (data.model || '') + ' · ' + (data.mode || '');
+    if (type === 'step.started') return 'step ' + (data.step != null ? data.step : '?') + (data.kind ? ' · ' + data.kind : '');
+    if (type === 'tool.call') return data.name || 'tool';
+    if (type === 'tool.result') return (data.ok ? '完成 · ' : '失败 · ') + (data.preview || '');
+    if (type === 'run.waiting_approval') return '等待审批 · ' + (data.tool || '');
+    if (type === 'run.succeeded') return '执行成功';
+    if (type === 'run.failed') return '执行失败 · ' + (data.error || data.message || '');
+    if (type === 'run.canceled') return '已取消';
+    if (type === 'ping') return 'heartbeat';
+    return JSON.stringify(data).slice(0, 120);
+  }
+
+  function appendEvent(type, payload, id) {
+    if (S.emptyState && S.emptyState.parentNode) {
+      S.emptyState.remove();
+    }
+
+    let data = {};
+    try { data = payload ? JSON.parse(payload) : {}; } catch (e) { data = { raw: payload }; }
+
+    const ev = { type: type, data: data, id: id, at: new Date() };
+    S.events.push(ev);
+
+    const row = document.createElement('div');
+    row.className = 'ev';
+    row.dataset.t = type;
+
+    const seq = document.createElement('div');
+    seq.className = 'ev__seq';
+    seq.textContent = String(S.events.length);
+
+    const tm = document.createElement('div');
+    tm.className = 'ev__time';
+    tm.textContent = fmtTime(ev.at);
+
+    const bar = document.createElement('div');
+    bar.className = 'ev__bar';
+
+    const body = document.createElement('div');
+    body.className = 'ev__body';
+
+    const top = document.createElement('div');
+    top.className = 'ev__top';
+
+    const typeEl = document.createElement('span');
+    typeEl.className = 'ev__type';
+    typeEl.textContent = type;
+
+    const sum = document.createElement('span');
+    sum.className = 'ev__sum';
+    sum.textContent = summarize(type, data);
+
+    const json = document.createElement('div');
+    json.className = 'ev__json';
+    json.textContent = JSON.stringify(data, null, 2);
+
+    top.appendChild(typeEl);
+    top.appendChild(sum);
+    body.appendChild(top);
+    body.appendChild(json);
+
+    row.appendChild(seq);
+    row.appendChild(tm);
+    row.appendChild(bar);
+    row.appendChild(body);
+
+    row.addEventListener('click', () => row.classList.toggle('open'));
+
+    els.streamBody.appendChild(row);
+
+    const bodyEl = els.streamBody;
+    const nearBottom = bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight < 160;
+    if (nearBottom) bodyEl.scrollTop = bodyEl.scrollHeight;
+
+    // 统计与状态联动
+    if (type === 'step.started') S.steps = Math.max(S.steps, Number(data.step) || S.steps + 1);
+    if (type === 'tool.call') { S.tools += 1; S.lastTool = data.name; }
+    if (type === 'run.started') {
+      if (data.runId && !S.runId) {
+        S.runId = data.runId;
+        els.runIdText.textContent = data.runId;
+      }
+      setState('RUNNING');
+    }
+    if (type === 'run.waiting_approval') {
+      setState('WAITING_APPROVAL');
+      if (data.tool) {
+        els.approvalDesc.innerHTML = '高风险工具 <code>' + escapeHtml(data.tool) + '</code> 已挂起，等待人工裁决。';
+      }
+    }
+    if (type === 'run.succeeded') setState('SUCCEEDED');
+    if (type === 'run.failed') setState('FAILED');
+    if (type === 'run.canceled') setState('CANCELED');
+
+    bumpStats();
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+
+  function appendOutput(text) {
+    if (!text) return;
+    S.chars += text.length;
+    const atBottom = els.output.scrollHeight - els.output.scrollTop - els.output.clientHeight < 40;
+    els.output.textContent += text;
+    if (atBottom) els.output.scrollTop = els.output.scrollHeight;
+    els.kChars.textContent = String(S.chars);
+  }
+
+  /* ================= SSE 解析 ================= */
+  function parseBlock(raw) {
+    const lines = raw.split('\n');
+    let id = null, type = 'message';
+    const dataLines = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line || line.charAt(0) === ':') continue;
+      const c = line.indexOf(':');
+      const field = c === -1 ? line : line.slice(0, c);
+      let value = c === -1 ? '' : line.slice(c + 1);
+      if (value.charAt(0) === ' ') value = value.slice(1);
+      if (field === 'id') id = value;
+      else if (field === 'event') type = value || 'message';
+      else if (field === 'data') dataLines.push(value);
+    }
+    if (!dataLines.length && id === null) return null;
+    return { id: id, type: type, data: dataLines.join('\n') };
+  }
+
+  async function consumeSse(response, onMessage) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, '\n');
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        const raw = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const msg = parseBlock(raw);
+        if (msg) onMessage(msg);
+      }
+    }
+    if (buffer.trim()) {
+      const msg = parseBlock(buffer);
+      if (msg) onMessage(msg);
+    }
+  }
+
+  function handleMessage(msg) {
+    const idNum = msg.id != null && msg.id !== '' ? Number(msg.id) : null;
+    if (idNum != null && !isNaN(idNum) && idNum > 0) S.lastEventId = String(idNum);
+
+    if (msg.type === 'ping') {
+      setConn(S.demo ? 'demo' : 'live', S.demo ? '演示' : '已连接');
+      return;
+    }
+    if (msg.type === 'llm.delta' || msg.type === 'message') {
+      let text = '';
+      try {
+        const d = JSON.parse(msg.data);
+        text = d.text || '';
+      } catch (e) {
+        text = msg.data || '';
+      }
+      if (text) appendOutput(text);
+      return;
+    }
+    appendEvent(msg.type, msg.data, msg.id);
+  }
+
+  /* ================= 真实请求 ================= */
+  function headers(json) {
+    const h = { 'X-Api-Key': S.apiKey };
+    if (json) h['Content-Type'] = 'application/json';
+    if (S.lastEventId) h['Last-Event-ID'] = S.lastEventId;
+    return h;
+  }
+
+  function buildBody() {
+    const body = {
+      query: els.query.value.trim(),
+      model: els.model.value || undefined,
+      maxSteps: Number(els.maxSteps.value) || undefined
+    };
+    const mode = els.mode.value;
+    if (mode) body.mode = mode;
+    return body;
+  }
+
+  function resetRun() {
+    S.events = [];
+    S.steps = 0;
+    S.tools = 0;
+    S.chars = 0;
+    S.runId = null;
+    S.lastEventId = null;
+    S.endedAt = 0;
+    S.startedAt = Date.now();
+    els.streamBody.innerHTML = '';
+    els.output.textContent = '';
+    els.runIdText.textContent = '—';
+    els.approvalCard.hidden = true;
+    setState('PENDING');
+    bumpStats();
+    startTick();
+  }
+
+  async function startRun() {
+    const query = els.query.value.trim();
+    if (!query) {
+      els.query.classList.add('invalid');
+      els.queryErr.classList.add('show');
+      els.query.focus();
+      toast('请先输入任务描述', 'err');
+      return;
+    }
+    els.query.classList.remove('invalid');
+    els.queryErr.classList.remove('show');
+
+    if (S.abort) { try { S.abort.abort(); } catch (e) {} }
+    S.abort = new AbortController();
+    S.demo = false;
+    resetRun();
+    els.runBtn.disabled = true;
+    setConn('idle', '连接中');
+    bumpStats();
+
+    try {
+      const res = await fetch(S.base + '/v1/agent/runs/stream', {
+        method: 'POST',
+        headers: headers(true),
+        body: JSON.stringify(buildBody()),
+        signal: S.abort.signal
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error('HTTP ' + res.status + ' ' + text.slice(0, 160));
+      }
+      setConn('live', '已连接');
+      await consumeSse(res, handleMessage);
+
+      if (S.state === 'RUNNING' || S.state === 'PENDING') {
+        setState('SUCCEEDED');
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      setConn('error', '连接失败');
+      toast('后端不可达，进入离线演示', 'err');
+      await runDemo(query, err);
+    } finally {
+      els.runBtn.disabled = false;
+    }
+  }
+
+  async function reconnect() {
+    if (!S.runId) { toast('当前没有可重连的 run', 'err'); return; }
+    if (S.abort) { try { S.abort.abort(); } catch (e) {} }
+    S.abort = new AbortController();
+    setConn('idle', '重连中');
+    try {
+      const res = await fetch(S.base + '/v1/agent/runs/' + encodeURIComponent(S.runId) + '/events', {
+        method: 'GET',
+        headers: headers(false),
+        signal: S.abort.signal
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      setConn('live', '已连接');
+      await consumeSse(res, handleMessage);
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      setConn('error', '重连失败');
+      toast('重连失败：' + err.message, 'err');
+    }
+  }
+
+  async function pollStatus() {
+    if (!S.runId) { toast('当前没有 run', 'err'); return; }
+    try {
+      const res = await fetch(S.base + '/v1/agent/runs/' + encodeURIComponent(S.runId) + '/status', {
+        method: 'GET',
+        headers: headers(false)
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || ('HTTP ' + res.status));
+      const st = (json.data && (json.data.state || json.data.status)) || 'UNKNOWN';
+      setState(st);
+      appendEvent('status', JSON.stringify(json.data || json), null);
+      toast('状态：' + st);
+    } catch (err) {
+      toast('查询失败：' + err.message, 'err');
+    }
+  }
+
+  async function cancelRun() {
+    if (!S.runId) { toast('当前没有 run', 'err'); return; }
+    try {
+      const res = await fetch(S.base + '/v1/agent/runs/' + encodeURIComponent(S.runId) + '/cancel', {
+        method: 'POST',
+        headers: headers(false)
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || ('HTTP ' + res.status));
+      setState('CANCELED');
+      toast('已请求取消');
+    } catch (err) {
+      toast('取消失败：' + err.message, 'err');
+    }
+  }
+
+  async function decide(approve) {
+    if (!S.runId) { toast('当前没有 run', 'err'); return; }
+    const action = approve ? 'approve' : 'reject';
+    try {
+      const res = await fetch(
+        S.base + '/v1/agent/runs/' + encodeURIComponent(S.runId) + '/' + action,
+        {
+          method: 'POST',
+          headers: headers(true),
+          body: JSON.stringify({ approver: els.approver.value, comment: approve ? 'approved by console' : 'rejected by console' })
+        }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || ('HTTP ' + res.status));
+      els.approvalCard.hidden = true;
+      setState(approve ? 'RUNNING' : 'CANCELED');
+      appendEvent(approve ? 'approval.approved' : 'approval.rejected',
+        JSON.stringify({ runId: S.runId, approver: els.approver.value }), null);
+      toast(approve ? '已批准' : '已驳回');
+    } catch (err) {
+      toast('审批失败：' + err.message, 'err');
+    }
+  }
+
+  /* ================= 离线演示 ================= */
+  function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+  async function runDemo(query, cause) {
+    S.demo = true;
+    setConn('demo', '离线演示');
+    resetRun();
+    S.runId = 'demo-' + Math.random().toString(36).slice(2, 10);
+    els.runIdText.textContent = S.runId;
+    appendEvent('note', JSON.stringify({ message: '后端未连接，正在以离线演示模式运行', cause: cause ? String(cause.message || cause) : '' }), null);
+
+    await sleep(240);
+    handleMessage({ id: '1', type: 'run.started', data: JSON.stringify({ runId: S.runId, model: els.model.value, mode: els.mode.value || 'REACT' }) });
+
+    const script = [
+      { t: 'step.started', d: { step: 1, kind: 'LLM' } },
+      { text: '开始分析任务：' + query.slice(0, 40) + '\n' },
+      { t: 'tool.call', d: { callId: 'c1', name: 'asset_search' } },
+      { text: '→ 调用 asset_search 检索资产…\n' },
+      { t: 'tool.result', d: { callId: 'c1', ok: true, preview: '命中 42 条内网资产记录' } },
+      { t: 'step.started', d: { step: 2, kind: 'LLM' } },
+      { t: 'tool.call', d: { callId: 'c2', name: 'vuln_scan' } },
+      { t: 'tool.result', d: { callId: 'c2', ok: true, preview: '发现 7 个高危暴露面' } },
+      { t: 'step.started', d: { step: 3, kind: 'LLM' } },
+      { text: '汇总完成：42 条资产中 7 个高危暴露面，建议优先修复 22/443 端口暴露。\n' },
+      { t: 'run.succeeded', d: { runId: S.runId, steps: 3 } }
+    ];
+
+    let seq = 2;
+    for (let i = 0; i < script.length; i++) {
+      if (S.abort && S.abort.signal.aborted) return;
+      await sleep(280 + Math.random() * 420);
+      const item = script[i];
+      if (item.text) {
+        for (let k = 0; k < item.text.length; k += 3) {
+          appendOutput(item.text.slice(k, k + 3));
+          await sleep(9);
+        }
+      } else {
+        handleMessage({ id: String(seq++), type: item.t, data: JSON.stringify(item.d) });
+      }
+    }
+  }
+
+  /* ================= 绑定 ================= */
+  els.runBtn.addEventListener('click', startRun);
+  els.reconnectBtn.addEventListener('click', reconnect);
+  els.clearBtn.addEventListener('click', () => {
+    S.events = [];
+    els.streamBody.innerHTML = '';
+    els.output.textContent = '';
+    S.chars = 0;
+    bumpStats();
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.innerHTML = '<p class="empty__quote">"每一次推理，都是一次可观测的执行。"</p>' +
+      '<p class="empty__sub">Dispatch a run to begin</p>';
+    els.streamBody.appendChild(e);
+    S.emptyState = e;
+  });
+  els.statusBtn.addEventListener('click', pollStatus);
+  els.cancelBtn.addEventListener('click', cancelRun);
+  els.approveBtn.addEventListener('click', () => decide(true));
+  els.rejectBtn.addEventListener('click', () => decide(false));
+
+  els.runIdBox.addEventListener('click', async () => {
+    if (!S.runId) return;
+    try {
+      await navigator.clipboard.writeText(S.runId);
+      toast('runId 已复制');
+    } catch (e) {
+      toast('复制失败', 'err');
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      startRun();
+    }
+  });
+
+  els.query.addEventListener('input', () => {
+    els.query.style.height = 'auto';
+    els.query.style.height = Math.min(els.query.scrollHeight, 150) + 'px';
+    if (els.query.value.trim()) {
+      els.query.classList.remove('invalid');
+      els.queryErr.classList.remove('show');
+    }
+  });
+
+  function persist() {
+    try {
+      localStorage.setItem('agentflow.cfg', JSON.stringify({
+        base: S.base, apiKey: S.apiKey, approver: S.approver
+      }));
+    } catch (e) { /* 隐私模式忽略 */ }
+  }
+
+  function restore() {
+    try {
+      const raw = localStorage.getItem('agentflow.cfg');
+      if (!raw) return false;
+      const cfg = JSON.parse(raw);
+      if (cfg.base) { S.base = cfg.base; els.baseUrl.value = cfg.base; }
+      if (cfg.apiKey) { S.apiKey = cfg.apiKey; els.apiKey.value = cfg.apiKey; }
+      if (cfg.approver) { S.approver = cfg.approver; els.approver.value = cfg.approver; }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  els.baseUrl.addEventListener('change', () => {
+    S.base = els.baseUrl.value.trim().replace(/\/+$/, '');
+    persist();
+  });
+  els.apiKey.addEventListener('change', () => {
+    S.apiKey = els.apiKey.value.trim();
+    persist();
+  });
+  els.approver.addEventListener('change', () => {
+    S.approver = els.approver.value.trim();
+    persist();
+  });
+
+  /* ================= 启动 ================= */
+  const restored = restore();
+  els.baseUrl.value = S.base;
+  setState('IDLE');
+  bumpStats();
+  setConn('idle', '未连接');
+
+  /**
+   * 探活：从「同源」与「localhost:8080」中挑一个活着的作为后端地址。
+   * 后端自带本页面时同源即命中；用静态服务器调试时自动回落到 8080。
+   */
+  async function detectBackend() {
+    const candidates = [];
+    if (restored) candidates.push(S.base);
+    if (SAME_ORIGIN) candidates.push(SAME_ORIGIN);
+    if (candidates.indexOf('http://localhost:8080') === -1) candidates.push('http://localhost:8080');
+
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i];
+      try {
+        const r = await fetch(c + '/actuator/health', { method: 'GET' });
+        if (r.ok) {
+          S.base = c;
+          els.baseUrl.value = c;
+          setConn('live', '后端在线');
+          return;
+        }
+      } catch (e) { /* 试下一个候选 */ }
+    }
+    setConn('idle', '未连接');
+  }
+
+  detectBackend();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# mock-llm 假模型服务：压测时替代真实大模型，默认监听 9000 端口
+server:
+  port: 9000
+
+spring:
+  application:
+    name: mock-llm
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
