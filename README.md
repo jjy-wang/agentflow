@@ -1,6 +1,6 @@
 # AgentFlow —— 企业级 Agent 运行时平台
 
-[![CI](https://github.com/qwertyuiop1234561234563/agentflow/actions/workflows/ci.yml/badge.svg)](https://github.com/qwertyuiop1234561234563/agentflow/actions/workflows/ci.yml)
+[![CI](https://github.com/jjy-wang/agentflow/actions/workflows/ci.yml/badge.svg)](https://github.com/jjy-wang/agentflow/actions/workflows/ci.yml)
 ![Java](https://img.shields.io/badge/Java-17-orange)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.10-brightgreen)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-blue)
