@@ -1,6 +1,27 @@
 # AgentFlow —— 企业级 Agent 运行时平台
 
-把"大模型 + 工具 + 记忆 + 流式输出"封装成可托管、可观测、可限流、可中断恢复的运行时。业务方只提交一个 `run` 请求，平台负责模型路由、上下文管理、工具调度、并发隔离、配额控制、链路追踪与审计。
+![Java](https://img.shields.io/badge/Java-17-orange)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.10-brightgreen)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-blue)
+![License](https://img.shields.io/badge/License-MIT-yellow)
+
+> 把长任务 Agent 做成**可恢复、可限流、可审批、可观测**的运行时：断线能续、崩溃能捡、重复提交只执行一次、高风险工具必须人工放行。
+
+| 实测指标 | 数值 |
+|---|---|
+| 单元 + 集成测试 | **208 个全绿**（Testcontainers 拉起真实 PostgreSQL / Redis / RabbitMQ） |
+| 限流雪崩修复 | 同场景失败率 **81% → 0%**（20 并发 × 10 轮，200/200 成功） |
+| 单实例吞吐 | **5.59 runs/s**，P50 / P95 / P99 = 3045 / 3076 / 3091 ms |
+| 资源占用 | 堆上限 **512 MB**，压测期间 0 OOM、0 ERROR |
+
+> 所有数字均为本机 Docker 实测，测试方法与原始数据见 [docs/BENCHMARK.md](docs/BENCHMARK.md)，不做线上集群口径的夸大。
+
+**30 秒跑起来**（需要 Docker）：
+
+```bash
+docker compose up -d --build
+# 浏览器打开 http://localhost:8080 —— 内置零依赖控制台
+```
 
 技术栈：Java 17 · Spring Boot 3.2.10 · WebFlux · MyBatis-Plus · PostgreSQL 16 + pgvector · Redis 7 · RabbitMQ · Resilience4j · Micrometer/Prometheus · Testcontainers · k6
 
